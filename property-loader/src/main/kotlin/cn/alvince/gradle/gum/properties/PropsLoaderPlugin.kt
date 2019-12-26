@@ -4,10 +4,11 @@ import groovy.lang.Closure
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import java.io.DataInputStream
+import java.io.File
 import java.io.FileInputStream
 import java.util.*
 
-class PluginImpl : Plugin<Project> {
+class PropsLoaderPlugin : Plugin<Project> {
 
     companion object {
         const val EXT_LOCAL_PROPS = "localProps"
@@ -21,18 +22,38 @@ class PluginImpl : Plugin<Project> {
         loadLocalProps(target)
         installFunGetProp(target)
         installFunGetPropLocal(target)
+        installTasks(target)
     }
 
     private fun loadLocalProps(target: Project) {
-        target.file("local.properties").takeIf { it.exists() }?.let {
-            DataInputStream(FileInputStream(it))
-        }?.let { ins ->
+        searchFiles(target) { list ->
             Properties().apply {
-                ins.use { load(it) }
+                list.forEach { file ->
+                    DataInputStream(FileInputStream(file)).let { ins ->
+                        Properties().apply {
+                            ins.use { load(it) }
+                        }
+                    }
+                }
+            }.also {
+                target.extensions.extraProperties.set(EXT_LOCAL_PROPS, it)
             }
-        }?.also {
-            target.extensions.extraProperties.set(EXT_LOCAL_PROPS, it)
         }
+    }
+
+    private inline fun searchFiles(target: Project, block: (List<File>) -> Unit) {
+        mutableListOf<File>().apply {
+            var proj: Project? = target
+            do {
+                proj?.file("local.properties")
+                        ?.takeIf { it.exists() }
+                        ?.also { add(it) }
+                proj = proj?.parent
+            } while (proj != null)
+            reverse()
+        }.takeIf {
+            it.isNotEmpty()
+        }?.also(block)
     }
 
     private fun installFunGetProp(target: Project) {
@@ -63,6 +84,10 @@ class PluginImpl : Plugin<Project> {
                         } ?: ""
                     } ?: ""
         })
+    }
+
+    private fun installTasks(target: Project) {
+        target.tasks.create(PropsTask.TASK_VIEW_PROPS, PropsTask::class.java) { it.viewProperties() }
     }
 
 }
